@@ -13,7 +13,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (event.contentChanges.length === 0) {
 			return null;
 		}
-		const contentChange: vscode.TextDocumentContentChangeEvent = event.contentChanges[0]; // TODO: convert to for_each
+		const contentChange: vscode.TextDocumentContentChangeEvent = event.contentChanges[0];
 		if (!contentChange.text) {
 			return null;
 		}
@@ -30,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const document = editor.document;
 		const startLineNumber: number = editor.selection.start.line;
 		const startLine: vscode.TextLine = document.lineAt(startLineNumber);
-		const endLine: vscode.TextLine = document.lineAt(startLineNumber);
+		const nextLine: vscode.TextLine = document.lineAt(startLineNumber + 1);
 		const cursorOffset: number = contentChange.range.start.character + contentChange.text.length;
 		const cursorAtEol = cursorOffset === startLine.range.end.character;
 		const eol = document.eol === vscode.EndOfLine.LF ? '\n' : `\r\n`;
@@ -48,22 +48,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		if (contentChange.text.startsWith(eol)) {
-			const txt = contentChange.text;
+			const currentAndNextLines = new vscode.Range(startLine.range.start, nextLine.range.end);
+			const commentMatch = document.getText(currentAndNextLines).match(/^( *)\/\* (.*)\n *(.*) \*\//);
 
-			const currentLineCommentMatch = startLine.text.match(/^( *)\/\* (.*)$/);
-			const nextLineCommentMatch = endLine.text.match(/^ *(.*) \*\/$/);
-
-			if (currentLineCommentMatch && nextLineCommentMatch) {
-				const [, indentation, unformattedCurrentLine] = currentLineCommentMatch;
-				const [, unformattedNextLine] = nextLineCommentMatch;
-				const unformattedLines = [unformattedCurrentLine, unformattedNextLine];
-
+			if (commentMatch) {
+				const [, indentation, ...unformattedLines] = commentMatch;
 				const formattedText = formatIntoMultiLineComment(unformattedLines, indentation, eol);
 
 				editor.edit((editBuilder) => {
-					editBuilder.replace(new vscode.Range(startLine.range.start, endLine.range.end), formattedText);
+					editBuilder.replace(currentAndNextLines, formattedText);
 				}).then(() => {
-					setCursorPosition(editor, startLineNumber + 2, 0);
+					setCursorPosition(editor, startLineNumber + 2, -unformattedLines[1].trimEnd().length);
 				});
 			}
 		}
@@ -74,12 +69,11 @@ export function activate(context: vscode.ExtensionContext) {
 			const singleLineCommentMatch = startLine.text.match(/^( *)\/\* (.*) \*\/$/);
 			const middleLineCommentMatch = startLine.text.match(/^( *) \* (.*)$/);
 			if (singleLineCommentMatch) {
-				const [, indentation, unformattedText] = singleLineCommentMatch;
+				const [, indentation, unformattedLine] = singleLineCommentMatch;
 				if (contentChange.range.start.character + contentChange.text.length !== startLine.range.end.character - ' */'.length) {
 					return null;
 				}
-
-				const wrappedLines = wrapText(unformattedText, indentation, columnLimit);
+				const wrappedLines = wrapText(unformattedLine, indentation, columnLimit);
 				const formattedText = formatIntoMultiLineComment(wrappedLines, indentation, eol);
 
 				editor.edit((editBuilder) => {
@@ -89,8 +83,8 @@ export function activate(context: vscode.ExtensionContext) {
 				});
 			}
 			else if (middleLineCommentMatch && cursorAtEol) {
-				const [, indentation, unformattedText] = middleLineCommentMatch;
-				const wrappedLines = wrapText(unformattedText, indentation, columnLimit);
+				const [, indentation, unformattedLine] = middleLineCommentMatch;
+				const wrappedLines = wrapText(unformattedLine, indentation, columnLimit);
 				const formattedText = formatMidCommentLines(wrappedLines, indentation, eol);
 
 				editor.edit((editBuilder) => {
@@ -106,7 +100,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const editor = vscode.window?.activeTextEditor;
 		const document = editor?.document;
 		const eol = document?.eol === vscode.EndOfLine.LF ? '\n' : `\r\n`;
-		const configuration = vscode.workspace.getConfiguration(); // should we check the config on every invocation?
+		const configuration = vscode.workspace.getConfiguration();
 		const columnLimit = configuration.get<number>("multi-line-comment-formatter.columnLimit");
 
 		if (editor && document && columnLimit) {
@@ -117,64 +111,33 @@ export function activate(context: vscode.ExtensionContext) {
 			const text = document.getText(extendedSelectionRange);
 			const lines = text.split('\n');
 
-			// const [, indentation] = lines.find(line => /^( *)[/ ]\* /.test(line)) || '';
-			const [, indentation] = lines.find(line => /^( *) \* /.test(line)) || '';
-
-			// if (!lastElement || typeof lastElement === "string") {
-			// 	acc.push([line]);
-			// }
-			// else {
-			// 	lastElement.push(line);
-			// }
-			const formatted = lines.reduce((acc, line) => {
-				if (line.match(/^ *\* (.*)$/)) {
+			const indentation = lines.find(line => /^ * \* /.test(line))?.split(' * ')[0] || '';
+			const aggregatedLines = lines.reduce((acc, line) => {
+				const middleLineNonEmptyCommentMatch = line.match(/^ * \* (.*\S.*)$/);
+				if (middleLineNonEmptyCommentMatch) {
+					const unformattedLine = middleLineNonEmptyCommentMatch[1].trimEnd();
 					const lastElement = acc.slice(-1)[0];
 					if (lastElement && Array.isArray(lastElement)) {
-						lastElement.push(line);
+						lastElement.push(unformattedLine);
 					} else {
-						acc.push([line]);
+						acc.push([unformattedLine]);
 					}
 				} else {
 					acc.push(line);
 				}
 				return acc;
 			}, [] as any);
-			// let result = formatted.map(item => Array.isArray(item) ? updatedItem : item)
-			// let result = array.map(item => item.id === updatedItem.id ? updatedItem : item)
 
-			// const arr = [0, 0, [1, 1], 0, [1, 1, 1]];
-			let result = formatted.map(item => {
-				if (Array.isArray(item)) {
-					console.log(item);
+			let formattedText = aggregatedLines.map((item: any) => {
+				if (typeof item === "string") {
 					return item;
 				}
-				else {
-					return item;
-				}
-			});
-			console.log(result);
-
-			// const formatted = text.split('\n').reduce((acc, line) => {
-			// 	const middleLineCommentMatch = line.match(/^( *) \* (.*)$/);
-			// 	if (middleLineCommentMatch) {
-			// 		const [, indentation, unformattedCurrentLine] = middleLineCommentMatch;
-			// 		if (!acc['indentation']) {
-			// 			acc['indentation'] = indentation;
-			// 		}
-			// 		acc['currentParagraph'].push(unformattedCurrentLine);
-			// 	} else {
-			// 		const unformattedText = acc['currentParagraph'].join(' ');
-			// 		const wrappedLines = wrapText(unformattedText, acc['indentation'], columnLimit);
-			// 		const formattedText = formatMidCommentLines(wrappedLines, acc['indentation'], eol);
-			// 		acc['text'].push(formattedText);
-			// 		acc['text'].push(line);
-			// 	}
-			// 	return acc;
-			// }, { text: [] as string[], currentParagraph: [] as string[], indentation: '' });
+				const unformattedParagraph = item.join(' ');
+				const wrappedLines = wrapText(unformattedParagraph, indentation, columnLimit);
+				return formatMidCommentLines(wrappedLines, indentation, eol);
+			}).join('\n');
 
 			editor.edit((editBuilder) => {
-				// const formattedText = formatted.text.join('\n');
-				const formattedText = formatted.join('\n');
 				editBuilder.replace(extendedSelectionRange, formattedText);
 			});
 		}
@@ -183,25 +146,8 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposableCommand);
 }
 
-// const startLineNumber: number = editor.selection.start.line;
-// const startLine: vscode.TextLine = document.lineAt(startLineNumber);
-
-// const indentation = text.split(' * ')[0];
-// if (hasOnlyBlanks(indentation)) {
-// 	const unformattedText: string = text.split(eol).map(line => line.split(' * ')[1]).join(' ');
-// 	const wrappedLines = wrapText(unformattedText, indentation, columnLimit);
-// 	// const formattedText = lines.map(line => line.trimEnd()).map(line => indentation + ' * ' + line).join(eol);
-// 	const formattedText = formatMidCommentLines(wrappedLines, indentation, eol);
-
-// 	editor.edit((editBuilder) => {
-// 		if (formattedText) {
-// 			editBuilder.replace(extendedSelectionRange, formattedText);
-// 		}
-// 	});
-// }
-
 function hasOnlyBlanks(str: string) {
-	return !str.replace(/[\t ]/g, '').length;
+	return (/^[\t ]*$/.test(str));
 }
 
 function wrapText(text: string, indentation: string, columnLimit: number) {
@@ -215,26 +161,21 @@ function formatMidCommentLines(lines: string[], indentation: string, eol: string
 }
 
 function formatIntoMultiLineComment(lines: string[], indentation: string, eol: string) {
-	const text = lines.map(line => line.trimEnd()).join(`\n${indentation} * `);
-	return multiLineFormat.map(line => indentation + line).join(eol).replace("{text}", text);
+	lines = lines.map(line => line.trimEnd());
+	return [
+		`${indentation}/*`,
+		`${indentation} * ${lines[0]}`,
+		`${indentation} * ${lines[1]}`,
+		`${indentation} */`
+	].join(eol);
 }
+
+// function formatIntoMultiLineComment(lines: string[], indentation: string, eol: string) {
+// 	const text = lines.map(line => line.trimEnd()).join(`\n${indentation} * `);
+// 	return multiLineFormat.map(line => indentation + line).join(eol).replace("{text}", text);
+// }
 
 function setCursorPosition(editor: vscode.TextEditor, line: number, endOffset: number) {
-	const cursorPosition = editor.document.lineAt(line).range.end.translate(0, endOffset);
+	const cursorPosition: vscode.Position = editor.document.lineAt(line).range.end.translate(0, endOffset);
 	editor.selection = new vscode.Selection(cursorPosition, cursorPosition);
-}
-
-// TODO: trim trailing whitespaces
-function wrapTextDepredated(text: string, columnLimit: number, eol: string) {
-	const indentation = text.split(' * ')[0];
-	if (!hasOnlyBlanks(indentation)) {
-		console.log(`Expected: (indentation) + ' * '`);
-		return null;
-	}
-
-	const length = columnLimit - indentation.length - ' * '.length;
-	const unformattedText: string = text.split(eol).map(line => line.split(' * ')[1]).join(' ');
-	const wrappedLines = unformattedText.match(new RegExp(`.{1,${length}}(\\b|$)`, 'g'));
-
-	return wrappedLines?.map(line => indentation + ' * ' + line).join(eol);
 }
