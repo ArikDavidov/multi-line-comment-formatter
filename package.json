@@ -1,14 +1,17 @@
 {
 	"name": "multi-line-comment-formatter",
 	"displayName": "Multi-Line Comment Formatter",
-	"description": "",
-	"version": "0.0.1",
+	"publisher": "ArielDavidov",
+	"description": "Formatter for /* ... */ style (C style) multi-line comments",
+	"version": "0.1.0",
 	"engines": {
 		"vscode": "^1.49.0"
 	},
 	"categories": [
+		"Formatters",
 		"Other"
 	],
+	"icon": " images/icon.png",
 	"activationEvents": [
 		"onLanguage:c",
 		"onCommand:multi-line-comment-formatter.wrapSelectedLines"
@@ -72,9 +75,7 @@
 		"typescript": "^4.0.2",
 		"vscode-test": "^1.4.0"
 	},
-	"dependencies": {
-		"vscode": "^1.1.37"
-	},
+	"dependencies": {},
 	"keywords": [
 		"c",
 		"linux",
@@ -84,6 +85,7 @@
 		"convention",
 		"single-line",
 		"multi-line",
+		"multiline",
 		"c-style",
 		"comment",
 		"block",

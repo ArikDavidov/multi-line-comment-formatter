@@ -2,12 +2,6 @@
 
 import * as vscode from 'vscode';
 
-const multiLineFormat = [
-    '/*',
-    ' * {text}',
-    ' */'
-];
-
 export function activate(context: vscode.ExtensionContext) {
     const disposableListener = vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.contentChanges.length === 0) {
@@ -49,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (contentChange.text.startsWith(eol)) {
             const currentAndNextLines = new vscode.Range(startLine.range.start, nextLine.range.end);
-            const commentMatch = document.getText(currentAndNextLines).match(/^( *)\/\* (.*)\n *(.*) \*\//);
+            const commentMatch = document.getText(currentAndNextLines).match(/^( *)\/\* (.*)\r?\n *(.*) \*\//);
 
             if (commentMatch) {
                 const [, indentation, ...unformattedLines] = commentMatch;
@@ -109,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
                 document.lineAt(editor.selection.end.line).range.end
             );
             const text = document.getText(extendedSelectionRange);
-            const lines = text.split('\n');
+            const lines = text.split(eol);
 
             const indentation = lines.find(line => /^ * \* /.test(line))?.split(' * ')[0] || '';
             const aggregatedLines = lines.reduce((acc, line) => {
@@ -135,7 +129,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const unformattedParagraph = item.join(' ');
                 const wrappedLines = wrapText(unformattedParagraph, indentation, columnLimit);
                 return formatMidCommentLines(wrappedLines, indentation, eol);
-            }).join('\n');
+            }).join(eol);
 
             editor.edit((editBuilder) => {
                 editBuilder.replace(extendedSelectionRange, formattedText);
@@ -169,11 +163,6 @@ function formatIntoMultiLineComment(lines: string[], indentation: string, eol: s
         `${indentation} */`
     ].join(eol);
 }
-
-// function formatIntoMultiLineComment(lines: string[], indentation: string, eol: string) {
-// 	const text = lines.map(line => line.trimEnd()).join(`\n${indentation} * `);
-// 	return multiLineFormat.map(line => indentation + line).join(eol).replace("{text}", text);
-// }
 
 function setCursorPosition(editor: vscode.TextEditor, line: number, endOffset: number) {
     const cursorPosition: vscode.Position = editor.document.lineAt(line).range.end.translate(0, endOffset);
